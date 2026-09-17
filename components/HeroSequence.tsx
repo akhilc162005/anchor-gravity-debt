@@ -67,6 +67,28 @@ export default function HeroSequence() {
     const frameCache: (HTMLImageElement | null)[] = new Array(TOTAL_FRAMES).fill(null);
     const loadedFrames = new Set<number>();
 
+    // Cached render dimensions
+    let cachedRenderWidth = canvasWidth;
+    let cachedRenderHeight = canvasHeight;
+    let cachedOffsetX = 0;
+    let cachedOffsetY = 0;
+    let baseImgRatio = 0;
+
+    function recalculateCover(imgRatio: number) {
+      const canvasRatio = canvasWidth / canvasHeight;
+      if (imgRatio > canvasRatio) {
+        cachedRenderWidth = canvasHeight * imgRatio;
+        cachedRenderHeight = canvasHeight;
+        cachedOffsetX = (canvasWidth - cachedRenderWidth) / 2;
+        cachedOffsetY = 0;
+      } else {
+        cachedRenderHeight = canvasWidth / imgRatio;
+        cachedRenderWidth = canvasWidth;
+        cachedOffsetX = 0;
+        cachedOffsetY = (canvasHeight - cachedRenderHeight) / 2;
+      }
+    }
+
     function resizeCanvas() {
       canvasWidth = window.innerWidth;
       canvasHeight = window.innerHeight;
@@ -75,58 +97,90 @@ export default function HeroSequence() {
       canvas.width = canvasWidth * dpr;
       canvas.height = canvasHeight * dpr;
       ctx!.scale(dpr, dpr);
+      
+      if (baseImgRatio) {
+        recalculateCover(baseImgRatio);
+      }
       currentRenderedFrame = -1; // Force redraw of current frame
     }
     
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    function preloadFrame(index: number) {
-      if (index < 0 || index >= TOTAL_FRAMES || frameCache[index] || loadedFrames.has(index)) return;
-      const img = new Image();
-      img.decoding = 'async';
-      img.onload = () => {
-        loadedFrames.add(index);
+    // Background Sequential Preloader
+    let preloadIndex = 0;
+    let isPreloading = false;
+    function preloadNextBatch() {
+      if (preloadIndex >= TOTAL_FRAMES || isPreloading) return;
+      isPreloading = true;
+      
+      const loadNext = () => {
+        if (preloadIndex >= TOTAL_FRAMES) {
+          isPreloading = false;
+          return;
+        }
+        
+        const i = preloadIndex;
+        if (frameCache[i] || loadedFrames.has(i)) {
+          preloadIndex++;
+          loadNext();
+          return;
+        }
+        
+        const img = new Image();
+        img.decoding = 'async';
+        img.onload = () => {
+          loadedFrames.add(i);
+          if (!baseImgRatio && img.width > 0 && img.height > 0) {
+            baseImgRatio = img.width / img.height;
+            recalculateCover(baseImgRatio);
+          }
+          preloadIndex++;
+          loadNext(); // Load next frame immediately after this one finishes
+        };
+        img.onerror = () => {
+          console.warn(`[HeroSequence] Failed to load frame: ${i}`);
+          preloadIndex++;
+          loadNext(); // Continue anyway
+        };
+        img.src = getFramePath(i);
+        frameCache[i] = img;
       };
-      img.onerror = () => {
-        console.warn(`[HeroSequence] Failed to load frame: ${index}`);
-      };
-      img.src = getFramePath(index);
-      if (img.complete) {
-        loadedFrames.add(index);
-      }
-      frameCache[index] = img;
-    }
-
-    function managePreloadQueue(targetIndex: number) {
-      for (let i = 0; i <= 10; i++) {
-        preloadFrame((targetIndex + i) % TOTAL_FRAMES);
-      }
+      
+      loadNext();
     }
 
     function drawImageCover(img: HTMLImageElement) {
-      const imgRatio = img.width / img.height;
-      const canvasRatio = canvasWidth / canvasHeight;
-      let renderWidth = canvasWidth;
-      let renderHeight = canvasHeight;
-      let offsetX = 0;
-      let offsetY = 0;
-
-      if (imgRatio > canvasRatio) {
-        renderWidth = canvasHeight * imgRatio;
-        offsetX = (canvasWidth - renderWidth) / 2;
+      if (baseImgRatio) {
+        ctx!.drawImage(img, cachedOffsetX, cachedOffsetY, cachedRenderWidth, cachedRenderHeight);
       } else {
-        renderHeight = canvasWidth / imgRatio;
-        offsetY = (canvasHeight - renderHeight) / 2;
+        // Fallback for first frame if ratio not set yet
+        const imgRatio = img.width / img.height;
+        const canvasRatio = canvasWidth / canvasHeight;
+        let renderWidth = canvasWidth;
+        let renderHeight = canvasHeight;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (imgRatio > canvasRatio) {
+          renderWidth = canvasHeight * imgRatio;
+          offsetX = (canvasWidth - renderWidth) / 2;
+        } else {
+          renderHeight = canvasWidth / imgRatio;
+          offsetY = (canvasHeight - renderHeight) / 2;
+        }
+        ctx!.drawImage(img, offsetX, offsetY, renderWidth, renderHeight);
       }
-      ctx!.drawImage(img, offsetX, offsetY, renderWidth, renderHeight);
     }
 
     let animationFrameId: number;
     let lastTime: number | null = null;
     let accumulatedTime = 0;
+    let isVisible = true;
 
     function playCinematic(now: number) {
+      if (!isVisible) return; // Completely pause execution if out of view
+
       if (!lastTime) {
         // Wait until at least the first 5 frames are loaded before starting the timer to avoid initial stutter
         if (loadedFrames.has(0) && loadedFrames.has(1) && loadedFrames.has(2)) {
@@ -136,8 +190,6 @@ export default function HeroSequence() {
             titleContainerRef.current.classList.add('visible');
           }
         } else {
-          // Keep preloading first frames
-          managePreloadQueue(0);
           animationFrameId = requestAnimationFrame(playCinematic);
           return;
         }
@@ -155,9 +207,6 @@ export default function HeroSequence() {
       let targetFrame = Math.floor(accumulatedTime / FRAME_DURATION) % TOTAL_FRAMES;
       
       if (targetFrame !== currentRenderedFrame) {
-        managePreloadQueue(targetFrame);
-        // If the calculated frame hasn't loaded yet, we hold on the last rendered frame.
-        // It acts as a natural buffer pause.
         const img = frameCache[targetFrame];
         if (img && loadedFrames.has(targetFrame)) {
           drawImageCover(img);
@@ -168,14 +217,31 @@ export default function HeroSequence() {
       animationFrameId = requestAnimationFrame(playCinematic);
     }
 
-    // Initial preload burst and start loop
-    managePreloadQueue(0);
-    animationFrameId = requestAnimationFrame(playCinematic);
+    // Intersection Observer to pause/resume
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        isVisible = entry.isIntersecting;
+        if (isVisible) {
+          lastTime = null; // Reset delta time calculation so it resumes smoothly
+          animationFrameId = requestAnimationFrame(playCinematic);
+        } else {
+          cancelAnimationFrame(animationFrameId);
+        }
+      });
+    }, { threshold: 0.0 });
+    
+    if (heroContainerRef.current) {
+      observer.observe(heroContainerRef.current);
+    }
+
+    // Start background preload
+    preloadNextBatch();
 
     // Cleanup
     return () => {
       window.removeEventListener('resize', resizeCanvas);
       cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
     };
   }, []);
 
