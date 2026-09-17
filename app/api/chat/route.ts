@@ -43,6 +43,41 @@ function parseReplyAndExtraction(rawText: string) {
   return { reply, extracted };
 }
 
+async function sendBrevoEmail(visitorData: any, solutionText: string) {
+  if (!process.env.BREVO_API_KEY || !visitorData.email) return;
+  
+  const payload = {
+    sender: {
+      name: process.env.BREVO_FROM_NAME || "ANCHOR",
+      email: process.env.BREVO_FROM_EMAIL || "akhilc162005@gmail.com"
+    },
+    to: [{
+      email: visitorData.email,
+      name: visitorData.name || "Visitor"
+    }],
+    subject: "ANCHOR - Case Resolved",
+    htmlContent: `
+      <h2>Case Details</h2>
+      <p><strong>Name:</strong> ${visitorData.name}</p>
+      <p><strong>Age:</strong> ${visitorData.age}</p>
+      <p><strong>Location:</strong> ${visitorData.location}</p>
+      <hr />
+      <h3>ANCHOR's Solution</h3>
+      <p>${solutionText.replace(/\n/g, '<br>')}</p>
+    `
+  };
+
+  await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json',
+      'api-key': process.env.BREVO_API_KEY,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  }).catch(e => console.error("[Brevo Email Error]", e));
+}
+
 export async function POST(req: Request) {
   try {
     const { conversationHistory, visitorData, stage } = await req.json();
@@ -73,6 +108,12 @@ export async function POST(req: Request) {
       : visitorData;
 
     const updatedStage = updatedVisitorData.status === 'closed' ? 'success' : stage;
+
+    // Send email notification on transition to success
+    if (updatedStage === 'success' && stage !== 'success') {
+      // Fire and forget (don't await so we don't slow down the response)
+      sendBrevoEmail(updatedVisitorData, reply);
+    }
 
     return NextResponse.json({ reply, updatedVisitorData, updatedStage });
   } catch (err: any) {
