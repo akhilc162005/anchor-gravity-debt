@@ -188,7 +188,6 @@ export default function HeroSequence() {
           <div className="logo" ref={logoRef}>ANCHOR</div>
           <div className="nav-links" ref={navLinksRef}>
             <a href="#abilities">ABILITIES</a>
-            <a href="#debt">THE DEBT</a>
             <a href="#origin">ORIGIN</a>
           </div>
         </nav>

@@ -191,11 +191,131 @@ body, html {
   100% { opacity: 0.4; transform: translateY(0); }
 }
 
-/* Responsive */
 @media (max-width: 768px) {
   .nav-links { display: none; }
   .top-nav { padding: 1.5rem 2rem; }
   .animated-title { font-size: 4rem; }
   .animated-dialogue { font-size: 1rem; }
   #cinematic-title-container { left: 5%; }
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  /* Pause non-essential CSS animations */
+  .logo,
+  .scroll-indicator {
+    animation: none;
+  }
+
+  /* Framer Motion and GSAP respect this at the JS level via the 
+     prefers-reduced-motion media query. Non-animated fallback for
+     static CSS transitions. */
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   NEON BORDER ANIMATION & TYPOGRAPHY
+   ============================================================ */
+@property --angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.anchor-widget {
+  position: fixed;
+  top: auto;
+  bottom: 24px;
+  right: 24px;
+  width: 400px;
+  height: 600px;
+  max-height: calc(100vh - 48px);
+  z-index: 9999;
+}
+
+@media (max-width: 640px) {
+  .anchor-widget {
+    width: 100vw;
+    height: 100vh;
+    bottom: 0;
+    right: 0;
+    border-radius: 0;
+  }
+}
+
+.anchor-panel {
+  position: relative;
+  border-radius: 20px;
+  background: #0a0a0a;
+  border: 1.5px solid rgba(255, 215, 0, 0.55);
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.10);
+  font-family: 'Inter', sans-serif;
+}
+
+.anchor-panel::before {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 21px;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--angle),
+    transparent 0%,
+    transparent 75%,
+    #FFD700 88%,
+    #FFF3B0 91%,
+    #FFD700 94%,
+    transparent 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: rotate-border 5s linear infinite;
+  z-index: 1;
+}
+
+.anchor-panel::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 24px;
+  background: conic-gradient(
+    from var(--angle),
+    transparent 0%,
+    transparent 80%,
+    rgba(255, 215, 0, 0.35) 88%,
+    rgba(255, 215, 0, 0.15) 94%,
+    transparent 100%
+  );
+  filter: blur(6px);
+  animation: rotate-border 5s linear infinite;
+  z-index: -1;
+  pointer-events: none;
+}
+
+@keyframes rotate-border {
+  to {
+    --angle: 360deg;
+  }
+}
+
+.anchor-panel .brand-name,
+.anchor-panel .status-label,
+.anchor-panel .quick-action-label,
+.anchor-panel .quote-text {
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@keyframes travel-right {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
 }

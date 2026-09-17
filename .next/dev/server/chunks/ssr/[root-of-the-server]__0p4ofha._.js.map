@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 10, "column": 0}, "map": {"version":3,"sources":["file:///D:/project1/app/page.tsx"],"sourcesContent":["import HeroSequence from \"@/components/HeroSequence\";\n\nexport default function Home() {\n  return (\n    <>\n      <HeroSequence />\n    </>\n  );\n}\n"],"names":["Home","HeroSequence"],"mappings":";;;;;;;;;;;;AAEe,SAASA;IACtB,qBACE;kBACE,cAAA,8OAACC;;;;;;;;;;AAGP"}}]
-}
