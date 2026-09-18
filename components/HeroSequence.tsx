@@ -107,54 +107,51 @@ export default function HeroSequence() {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Background Sequential Preloader
-    let preloadIndex = 0;
-    let isPreloading = false;
-    function preloadNextBatch() {
-      if (preloadIndex >= TOTAL_FRAMES || isPreloading) return;
-      isPreloading = true;
+    // Background Concurrent Preloader
+    const PRELOAD_WINDOW = 30; // Preload 1 second ahead
+    const MAX_CONCURRENT_LOADS = 6;
+    let activeLoads = 0;
+    const requestedFrames = new Set<number>();
+    
+    function manageBuffer() {
+      if (!isVisible) return;
       
-      const loadNext = () => {
-        if (preloadIndex >= TOTAL_FRAMES) {
-          isPreloading = false;
-          return;
-        }
-        
-        const i = preloadIndex;
-        if (frameCache[i] || loadedFrames.has(i)) {
-          preloadIndex++;
-          loadNext();
-          return;
-        }
-        
-        const img = new Image();
-        img.decoding = 'async';
-        img.onload = () => {
-          loadedFrames.add(i);
-          if (!baseImgRatio && img.width > 0 && img.height > 0) {
-            baseImgRatio = img.width / img.height;
-            recalculateCover(baseImgRatio);
-          }
-          preloadIndex++;
-          loadNext(); // Load next frame immediately after this one finishes
-        };
-        img.onerror = () => {
-          console.warn(`[HeroSequence] Failed to load frame: ${i}`);
-          preloadIndex++;
-          loadNext(); // Continue anyway
-        };
-        img.src = getFramePath(i);
-        frameCache[i] = img;
-      };
+      const startFrame = Math.max(currentRenderedFrame, 0);
       
-      loadNext();
+      for (let offset = 0; offset < PRELOAD_WINDOW; offset++) {
+        if (activeLoads >= MAX_CONCURRENT_LOADS) break;
+        
+        const frameIndex = (startFrame + offset) % TOTAL_FRAMES;
+        if (!loadedFrames.has(frameIndex) && !requestedFrames.has(frameIndex)) {
+          requestedFrames.add(frameIndex);
+          activeLoads++;
+          
+          const img = new Image();
+          img.decoding = 'async';
+          img.onload = () => {
+            loadedFrames.add(frameIndex);
+            if (!baseImgRatio && img.width > 0 && img.height > 0) {
+              baseImgRatio = img.width / img.height;
+              recalculateCover(baseImgRatio);
+            }
+            activeLoads--;
+            manageBuffer();
+          };
+          img.onerror = () => {
+            console.warn(`[HeroSequence] Failed to load frame: ${frameIndex}`);
+            activeLoads--;
+            manageBuffer();
+          };
+          img.src = getFramePath(frameIndex);
+          frameCache[frameIndex] = img;
+        }
+      }
     }
 
     function drawImageCover(img: HTMLImageElement) {
       if (baseImgRatio) {
         ctx!.drawImage(img, cachedOffsetX, cachedOffsetY, cachedRenderWidth, cachedRenderHeight);
       } else {
-        // Fallback for first frame if ratio not set yet
         const imgRatio = img.width / img.height;
         const canvasRatio = canvasWidth / canvasHeight;
         let renderWidth = canvasWidth;
@@ -179,41 +176,52 @@ export default function HeroSequence() {
     let isVisible = true;
 
     function playCinematic(now: number) {
-      if (!isVisible) return; // Completely pause execution if out of view
+      if (!isVisible) return;
 
       if (!lastTime) {
-        // Wait until at least the first 5 frames are loaded before starting the timer to avoid initial stutter
-        if (loadedFrames.has(0) && loadedFrames.has(1) && loadedFrames.has(2)) {
+        // Only wait for frame 0 to guarantee instant first paint
+        if (loadedFrames.has(0)) {
           lastTime = now;
-          // Show title immediately when animation starts
           if (titleContainerRef.current) {
             titleContainerRef.current.classList.add('visible');
           }
+          manageBuffer();
         } else {
+          manageBuffer();
           animationFrameId = requestAnimationFrame(playCinematic);
           return;
         }
       }
 
-      const deltaTime = now - lastTime;
+      const cappedDelta = Math.min(now - lastTime, 100);
       lastTime = now;
       
-      // Cap delta time to prevent massive jumps if tab is backgrounded
-      if (deltaTime < 100) {
-        accumulatedTime += deltaTime;
-      }
-
-      // Loop continuously
-      let targetFrame = Math.floor(accumulatedTime / FRAME_DURATION) % TOTAL_FRAMES;
+      const intendedTime = accumulatedTime + cappedDelta;
+      const intendedFrame = Math.floor(intendedTime / FRAME_DURATION) % TOTAL_FRAMES;
       
-      if (targetFrame !== currentRenderedFrame) {
-        const img = frameCache[targetFrame];
-        if (img && loadedFrames.has(targetFrame)) {
-          drawImageCover(img);
-          currentRenderedFrame = targetFrame;
+      if (intendedFrame !== currentRenderedFrame) {
+        const nextSequential = (currentRenderedFrame + 1) % TOTAL_FRAMES;
+        
+        if (loadedFrames.has(nextSequential)) {
+          // Safe to advance. If intended frame is ready, jump to it (time sync), else render highest ready sequential
+          if (loadedFrames.has(intendedFrame)) {
+            accumulatedTime = intendedTime;
+            currentRenderedFrame = intendedFrame;
+          } else {
+            accumulatedTime = nextSequential * FRAME_DURATION;
+            currentRenderedFrame = nextSequential;
+          }
+          
+          const img = frameCache[currentRenderedFrame];
+          if (img) drawImageCover(img);
+        } else {
+          // Buffer underrun. Gracefully hold current frame, do not advance time.
         }
+      } else {
+        accumulatedTime = intendedTime;
       }
 
+      manageBuffer();
       animationFrameId = requestAnimationFrame(playCinematic);
     }
 
@@ -235,7 +243,7 @@ export default function HeroSequence() {
     }
 
     // Start background preload
-    preloadNextBatch();
+    manageBuffer();
 
     // Cleanup
     return () => {

@@ -17,6 +17,7 @@ export default function CommunicationCenter() {
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
+  const emailSendingRef = useRef(false);
   
   const generateMessageId = () => Date.now().toString() + Math.random().toString(36).substring(2, 11);
   
@@ -123,7 +124,7 @@ export default function CommunicationCenter() {
   };
 
   const handleSend = (text: string = inputValue) => {
-    if (isTyping || isTransmitting) return;
+    if (isTyping || isTransmitting || emailSendingRef.current) return;
 
     if (text === "RESET_FLOW") {
       handleReset();
@@ -153,7 +154,7 @@ export default function CommunicationCenter() {
   };
 
   const handleRetry = () => {
-    if (isTyping || isTransmitting) return;
+    if (isTyping || isTransmitting || emailSendingRef.current) return;
 
     // Filter out previous error messages from the UI
     const cleanedMessages = messages.filter(m => m.sender !== 'system' || (!m.id.includes('_err') && !m.text.includes("I couldn't generate")));
@@ -212,8 +213,41 @@ export default function CommunicationCenter() {
           updatedData.email = userMessageText;
           setUserData(updatedData);
 
-          nextStage = 'grievance';
-          nextReply = "So... tell me. How can I help you?";
+          emailSendingRef.current = true;
+          setIsTransmitting(true);
+          try {
+            const res = await fetch('/api/anchor/email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updatedData)
+            });
+            
+            const data = await res.json().catch(() => ({ success: false }));
+            
+            if (!res.ok || data.success !== true) {
+               throw new Error(data.error || "Channel integration failed");
+            }
+            
+            emailSendingRef.current = false;
+            setIsTransmitting(false);
+            nextStage = 'grievance';
+            nextReply = "So... tell me. How can I help you?";
+          } catch (error) {
+            emailSendingRef.current = false;
+            setIsTransmitting(false);
+            setGravityLoad("STABLE");
+            setIsTyping(false);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: generateMessageId() + "_err",
+                sender: "system",
+                text: "Channel integration failed. Please try again.",
+                timestamp: getTimestamp(),
+              },
+            ]);
+            return;
+          }
         }
       }
 
